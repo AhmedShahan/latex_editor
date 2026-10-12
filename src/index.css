@@ -109,3 +109,86 @@ code {
   padding: 4px 8px;
   background: var(--code-bg);
 }
+
+.latex-page {
+  color: #000;
+  letter-spacing: normal;
+  font-family: 'CMU Serif', serif;
+}
+
+.latex-page .ProseMirror {
+  font-size: inherit;
+  font-family: inherit;
+  color: inherit;
+  letter-spacing: inherit;
+}
+
+.latex-page h1,
+.latex-page h2,
+.latex-page h3 {
+  font-family: inherit;
+  font-weight: 700;
+  letter-spacing: normal;
+  line-height: 1.2;
+  color: #000;
+  margin: 0.7em 0 0.35em;
+}
+
+.latex-page h1 {
+  font-size: 1.5em;
+}
+
+.latex-page h2 {
+  font-size: 1.25em;
+}
+
+.latex-page h3 {
+  font-size: 1.1em;
+}
+
+.latex-page p {
+  margin: 0 0 0.6em;
+}
+
+.latex-page p:last-child {
+  margin-bottom: 0;
+}
+
+/* Editor layout: preview gets the larger share, code panel stays beside it
+   and wraps long lines instead of forcing the row wider. The preview pane is
+   never clipped because the sheet is scaled to fit inside it. */
+.editor-layout {
+  display: flex;
+  gap: 16px;
+  align-items: flex-start;
+}
+
+.editor-preview {
+  flex: 2 1 0;
+  min-width: 0;
+  overflow: auto;
+  background: #ddd;
+  padding: 16px;
+}
+
+.editor-code {
+  flex: 1 1 0;
+  min-width: 0;
+  margin: 0;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+@media (max-width: 820px) {
+  .editor-layout {
+    flex-direction: column;
+  }
+
+  .editor-preview,
+  .editor-code {
+    flex: none;
+    width: 100%;
+    box-sizing: border-box;
+  }
+}

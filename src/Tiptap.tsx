@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useEditor, EditorContent, useEditorState } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
 import 'computer-modern/cmu-serif.css'
@@ -9,6 +9,18 @@ const HEADING_LABELS: Record<DocType, string[]> = {
   report: ['Chapter', 'Section', 'Subsection'],
   book: ['Chapter', 'Section', 'Subsection'],
 }
+
+type PaperSize = 'a4paper' | 'letterpaper' | 'legalpaper' | 'a5paper'
+const PAPER_SIZES: Record<PaperSize, { label: string; widthMm: number; heightMm: number }> = {
+  a4paper: { label: 'A4 (210×297 mm)', widthMm: 210, heightMm: 297 },
+  letterpaper: { label: 'Letter (215.9×279.4 mm)', widthMm: 215.9, heightMm: 279.4 },
+  legalpaper: { label: 'Legal (215.9×355.6 mm)', widthMm: 215.9, heightMm: 355.6 },
+  a5paper: { label: 'A5 (148×210 mm)', widthMm: 148, heightMm: 210 },
+}
+const PAPER_ORDER: PaperSize[] = ['a4paper', 'letterpaper', 'legalpaper', 'a5paper']
+
+const FONT_SIZES = ['10pt', '11pt', '12pt'] as const
+type FontSize = (typeof FONT_SIZES)[number]
 
 type Mark = { type: string }
 type JNode = {
@@ -55,17 +67,23 @@ const renderBlock = (n: JNode, docType: DocType): string => {
   return `% unsupported: ${n.type}`
 }
 
-const toLatex = (doc: JNode, docType: DocType) => {
+const toLatex = (doc: JNode, docType: DocType, paperSize: PaperSize, fontSize: FontSize) => {
   const body = (doc.content ?? [])
     .map((n) => renderBlock(n, docType))
     .filter(Boolean)
     .join('\n\n')
-  return `\\documentclass{${docType}}\n\n\\begin{document}\n\n${body}\n\n\\end{document}`
+  return `\\documentclass[${fontSize}, ${paperSize}]{${docType}}\n\n\\begin{document}\n\n${body}\n\n\\end{document}`
 }
 
 const Tiptap = () => {
   const [docType, setDocType] = useState<DocType>('article')
+  const [paperSize, setPaperSize] = useState<PaperSize>('a4paper')
+  const [fontSize, setFontSize] = useState<FontSize>('12pt')
   const [showGrid, setShowGrid] = useState(false)
+  const [scale, setScale] = useState(1)
+  const [contentHeight, setContentHeight] = useState(0)
+  const previewRef = useRef<HTMLDivElement>(null)
+  const pageRef = useRef<HTMLDivElement>(null)
 
   const editor = useEditor({
     extensions: [StarterKit.configure({ heading: { levels: [1, 2, 3] } })],
@@ -76,15 +94,75 @@ const Tiptap = () => {
     editor,
     selector: ({ editor }) => (editor ? (editor.getJSON() as unknown as JNode) : null),
   })
-  const code = json ? toLatex(json, docType) : ''
+  const code = json ? toLatex(json, docType, paperSize, fontSize) : ''
+
+  const paper = PAPER_SIZES[paperSize]
+  const pageWidthPx = (paper.widthMm / 25.4) * 96
+  const pageHeightPx = (paper.heightMm / 25.4) * 96
+
+  // Scale the sheet down so the whole page stays visible inside the preview
+  // pane instead of being clipped by the LaTeX code panel beside it.
+  useEffect(() => {
+    const el = previewRef.current
+    if (!el) return
+    const update = () => {
+      const available = el.clientWidth - 32 // minus the pane's 16px padding
+      setScale(available > 0 ? Math.min(1, available / pageWidthPx) : 1)
+    }
+    update()
+    const observer = new ResizeObserver(update)
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [pageWidthPx])
+
+  // Track the real rendered page height so the scaled wrapper reserves the
+  // correct vertical space (CSS transforms do not affect layout size).
+  useEffect(() => {
+    const el = pageRef.current
+    if (!el) return
+    const update = () => setContentHeight(el.offsetHeight)
+    update()
+    const observer = new ResizeObserver(update)
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [])
 
   return (
     <div style={{ textAlign: 'left', padding: 16 }}>
-      <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
-        <select value={docType} onChange={(e) => setDocType(e.target.value as DocType)}>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 12 }}>
+        <select
+          value={docType}
+          onChange={(e) => setDocType(e.target.value as DocType)}
+          aria-label="Document type"
+          title="Document type"
+        >
           <option value="article">Article</option>
           <option value="report">Report</option>
           <option value="book">Book</option>
+        </select>
+        <select
+          value={paperSize}
+          onChange={(e) => setPaperSize(e.target.value as PaperSize)}
+          aria-label="Paper size"
+          title="Paper size"
+        >
+          {PAPER_ORDER.map((p) => (
+            <option key={p} value={p}>
+              {PAPER_SIZES[p].label}
+            </option>
+          ))}
+        </select>
+        <select
+          value={fontSize}
+          onChange={(e) => setFontSize(e.target.value as FontSize)}
+          aria-label="Font size"
+          title="Font size"
+        >
+          {FONT_SIZES.map((f) => (
+            <option key={f} value={f}>
+              {f}
+            </option>
+          ))}
         </select>
         <label style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
           <input
@@ -106,31 +184,48 @@ const Tiptap = () => {
         ))}
       </div>
 
-      <div style={{ display: 'flex', gap: 16 }}>
-        <div style={{ flex: 1, background: '#ddd', padding: 16 }}>
+      <div className="editor-layout">
+        <div ref={previewRef} className="editor-preview">
           <div
             style={{
-              background: '#fff',
-              ...(showGrid
-                ? {
-                    backgroundImage: `repeating-linear-gradient(0deg, #eee 0, #eee 1px, transparent 1px, transparent 20px), repeating-linear-gradient(90deg, #eee 0, #eee 1px, transparent 1px, transparent 20px)`,
-                    backgroundSize: '20px 20px',
-                  }
-                : {}),
-              color: '#000',
-              fontFamily: '"CMU Serif", serif',
-              width: '210mm',
-              maxWidth: '100%',
-              minHeight: '297mm',
-              padding: '25mm',
-              boxSizing: 'border-box',
-              boxShadow: '0 0 6px rgba(0,0,0,0.3)',
+              width: pageWidthPx * scale,
+              height: Math.max(contentHeight, pageHeightPx) * scale,
+              margin: '0 auto',
+              position: 'relative',
             }}
           >
-            <EditorContent editor={editor} />
+            <div
+              ref={pageRef}
+              className="latex-page"
+              style={{
+                position: 'absolute',
+                top: 0,
+                left: 0,
+                background: '#fff',
+                ...(showGrid
+                  ? {
+                      backgroundImage: `repeating-linear-gradient(0deg, #eee 0, #eee 1px, transparent 1px, transparent 20px), repeating-linear-gradient(90deg, #eee 0, #eee 1px, transparent 1px, transparent 20px)`,
+                      backgroundSize: '20px 20px',
+                    }
+                  : {}),
+                color: '#000',
+                fontFamily: '"CMU Serif", serif',
+                fontSize,
+                lineHeight: 1.45,
+                width: `${paper.widthMm}mm`,
+                minHeight: `${paper.heightMm}mm`,
+                padding: '25mm',
+                boxSizing: 'border-box',
+                boxShadow: '0 0 6px rgba(0,0,0,0.3)',
+                transform: `scale(${scale})`,
+                transformOrigin: 'top left',
+              }}
+            >
+              <EditorContent editor={editor} />
+            </div>
           </div>
         </div>
-        <pre style={{ flex: 1, margin: 0, overflow: 'auto' }}>{code}</pre>
+        <pre className="editor-code">{code}</pre>
       </div>
     </div>
   )
