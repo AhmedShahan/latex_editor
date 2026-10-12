@@ -22,6 +22,14 @@ const PAPER_ORDER: PaperSize[] = ['a4paper', 'letterpaper', 'legalpaper', 'a5pap
 const FONT_SIZES = ['10pt', '11pt', '12pt'] as const
 type FontSize = (typeof FONT_SIZES)[number]
 
+const DEFAULT_MARGIN = '1in'
+const MARGIN_KEYS = ['top', 'bottom', 'left', 'right'] as const
+type MarginKey = (typeof MARGIN_KEYS)[number]
+type Margins = Record<MarginKey, string>
+type Geometry = { uniform: boolean; margin: string; margins: Margins }
+const MARGIN_LABELS: Record<MarginKey, string> = { top: 'Top', bottom: 'Bottom', left: 'Left', right: 'Right' }
+const DEFAULT_MARGINS: Margins = { top: DEFAULT_MARGIN, bottom: DEFAULT_MARGIN, left: DEFAULT_MARGIN, right: DEFAULT_MARGIN }
+
 // A text box positioned on the page, in millimetres from the paper's top-left.
 type PlacedText = { id: number; xMm: number; yMm: number; text: string }
 
@@ -70,21 +78,55 @@ const renderBlock = (n: JNode, docType: DocType): string => {
   return `% unsupported: ${n.type}`
 }
 
+// Sanitize margin values so they never break the LaTeX optional argument.
+const sanitizeMargin = (value: string): string => {
+  const cleaned = value.replaceAll('[', '').replaceAll(']', '').replace(/[\r\n]/g, '').trim()
+  return cleaned || DEFAULT_MARGIN
+}
+
+// Build the geometry package option string.
+const geometryOptions = ({ uniform, margin, margins }: Geometry): string =>
+  uniform
+    ? `margin=${sanitizeMargin(margin)}`
+    : [
+        `top=${sanitizeMargin(margins.top)}`,
+        `bottom=${sanitizeMargin(margins.bottom)}`,
+        `left=${sanitizeMargin(margins.left)}`,
+        `right=${sanitizeMargin(margins.right)}`,
+      ].join(', ')
+
+// Convert a length like "1in" or "2.5cm" to millimetres. Falls back to 25.4mm
+// (≈1in) if the value is empty, unparseable, or uses an unknown unit.
+// Rounds to 3 decimal places and clamps negative values to 0.
+const MM_PER_UNIT: Record<string, number> = {
+  mm: 1,
+  cm: 10,
+  in: 25.4,
+  pt: 25.4 / 72,
+  pc: 25.4 / 6,
+  px: 25.4 / 96,
+}
+const DEFAULT_MARGIN_MM = 25.4
+const marginToMm = (value: string): number => {
+  const match = /^(-?\d*\.?\d+)\s*(mm|cm|in|pt|pc|px)$/i.exec(sanitizeMargin(value))
+  const mm = match ? Number(match[1]) * MM_PER_UNIT[match[2].toLowerCase()] : NaN
+  if (!Number.isFinite(mm)) return DEFAULT_MARGIN_MM
+  return Math.max(0, Math.round(mm * 1000) / 1000)
+}
+
 const toLatex = (
   doc: JNode,
   docType: DocType,
   paperSize: PaperSize,
   fontSize: FontSize,
   placed: PlacedText[],
+  geometry: Geometry,
 ) => {
   const body = (doc.content ?? [])
     .map((n) => renderBlock(n, docType))
     .filter(Boolean)
     .join('\n\n')
 
-  // Absolutely-positioned text boxes, using the textpos package. In absolute
-  // mode its coordinates are measured from the top-left of the paper, which
-  // matches how the boxes are placed in the preview.
   const positioned = placed
     .filter((t) => t.text.trim().length > 0)
     .map((t) => {
@@ -93,15 +135,24 @@ const toLatex = (
     })
     .join('\n\n')
 
-  const preamble = positioned ? '\\usepackage[absolute,overlay]{textpos}\n\n' : ''
+  const preamble = [
+    `\\usepackage[${geometryOptions(geometry)}]{geometry}`,
+    positioned ? '\\usepackage[absolute,overlay]{textpos}' : '',
+  ]
+    .filter(Boolean)
+    .join('\n\n')
+
   const content = [body, positioned].filter(Boolean).join('\n\n')
-  return `\\documentclass[${fontSize}, ${paperSize}]{${docType}}\n\n${preamble}\\begin{document}\n\n${content}\n\n\\end{document}`
+  return `\\documentclass[${fontSize}, ${paperSize}]{${docType}}\n\n${preamble}\n\n\\begin{document}\n\n${content}\n\n\\end{document}`
 }
 
 const Tiptap = () => {
   const [docType, setDocType] = useState<DocType>('article')
   const [paperSize, setPaperSize] = useState<PaperSize>('a4paper')
   const [fontSize, setFontSize] = useState<FontSize>('12pt')
+  const [uniform, setUniform] = useState(true)
+  const [margin, setMargin] = useState(DEFAULT_MARGIN)
+  const [margins, setMargins] = useState<Margins>(DEFAULT_MARGINS)
   const [showGrid, setShowGrid] = useState(false)
   const [writeMode, setWriteMode] = useState(false)
   const [placed, setPlaced] = useState<PlacedText[]>([])
@@ -121,11 +172,24 @@ const Tiptap = () => {
     editor,
     selector: ({ editor }) => (editor ? (editor.getJSON() as unknown as JNode) : null),
   })
-  const code = json ? toLatex(json, docType, paperSize, fontSize, placed) : ''
+  const geometry: Geometry = { uniform, margin, margins }
+  const code = json ? toLatex(json, docType, paperSize, fontSize, placed, geometry) : ''
 
   const paper = PAPER_SIZES[paperSize]
   const pageWidthPx = (paper.widthMm / 25.4) * 96
   const pageHeightPx = (paper.heightMm / 25.4) * 96
+
+  // Compute CSS padding for the preview page from the margin values.
+  const pagePadding = uniform
+    ? `${marginToMm(margin)}mm`
+    : [
+        marginToMm(margins.top),
+        marginToMm(margins.right),
+        marginToMm(margins.bottom),
+        marginToMm(margins.left),
+      ]
+        .map((mm) => `${mm}mm`)
+        .join(' ')
 
   // Scale the sheet down so the whole page stays visible inside the preview
   // pane instead of being clipped by the LaTeX code panel beside it.
@@ -162,6 +226,18 @@ const Tiptap = () => {
   const commitPlaced = (id: number, text: string) => {
     if (!text.trim()) setPlaced((prev) => prev.filter((t) => t.id !== id))
   }
+
+  // Toggle uniform margins, carrying the value over.
+  const toggleUniform = (checked: boolean) => {
+    setUniform(checked)
+    if (checked) setMargin(sanitizeMargin(margins.top))
+    else {
+      const value = sanitizeMargin(margin)
+      setMargins({ top: value, bottom: value, left: value, right: value })
+    }
+  }
+  const setMarginSide = (key: MarginKey, value: string) =>
+    setMargins((prev) => ({ ...prev, [key]: value }))
 
   // "Write text" tool: when armed, a click anywhere on the sheet drops a text
   // box at exactly that point (in page millimetres) and focuses it so typing
@@ -235,6 +311,40 @@ const Tiptap = () => {
             </option>
           ))}
         </select>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+          <input
+            type="checkbox"
+            checked={uniform}
+            onChange={(e) => toggleUniform(e.target.checked)}
+            aria-label="Uniform"
+          />
+          Uniform
+        </label>
+        {uniform ? (
+          <label style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+            Margin
+            <input
+              type="text"
+              value={margin}
+              onChange={(e) => setMargin(e.target.value)}
+              aria-label="Margin"
+              style={{ width: 64 }}
+            />
+          </label>
+        ) : (
+          MARGIN_KEYS.map((key) => (
+            <label key={key} style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+              {MARGIN_LABELS[key]}
+              <input
+                type="text"
+                value={margins[key]}
+                onChange={(e) => setMarginSide(key, e.target.value)}
+                aria-label={`${MARGIN_LABELS[key]} margin`}
+                style={{ width: 56 }}
+              />
+            </label>
+          ))
+        )}
         <label style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
           <input
             type="checkbox"
@@ -315,7 +425,7 @@ const Tiptap = () => {
                 lineHeight: 1.45,
                 width: `${paper.widthMm}mm`,
                 minHeight: `${paper.heightMm}mm`,
-                padding: '25mm',
+                padding: pagePadding,
                 boxSizing: 'border-box',
                 boxShadow: '0 0 6px rgba(0,0,0,0.3)',
                 transform: `scale(${scale})`,
