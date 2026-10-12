@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
 import { useEditor, EditorContent, useEditorState } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
+import type { JSONContent, Range } from '@tiptap/core'
 import 'computer-modern/cmu-serif.css'
+
 type DocType = 'article' | 'report' | 'book'
 
 const HEADING_LABELS: Record<DocType, string[]> = {
@@ -127,6 +129,20 @@ const toLatex = (
   return `\\documentclass[${fontSize}, ${paperSize}]{${docType}}\n\n${preamble}\n\n\\begin{document}\n\n${body}\n\n\\end{document}`
 }
 
+const BODY_PLACEHOLDER = 'Please insert your text here...'
+const headingPlaceholder = (label: string) => `THIS IS ${label.toUpperCase()}`
+
+const headingBlock = (level: 1 | 2 | 3, label: string): JSONContent => ({
+  type: 'heading',
+  attrs: { level },
+  content: [{ type: 'text', text: headingPlaceholder(label) }],
+})
+
+const paragraphBlock = (): JSONContent => ({
+  type: 'paragraph',
+  content: [{ type: 'text', text: BODY_PLACEHOLDER }],
+})
+
 const Tiptap = () => {
   const [docType, setDocType] = useState<DocType>('article')
   const [paperSize, setPaperSize] = useState<PaperSize>('a4paper')
@@ -141,8 +157,13 @@ const Tiptap = () => {
   const pageRef = useRef<HTMLDivElement>(null)
 
   const editor = useEditor({
-    extensions: [StarterKit.configure({ heading: { levels: [1, 2, 3] } })],
-    content: '<p>WELCOME TO LATEX EDITOR</p>',
+    extensions: [
+      StarterKit.configure({
+        heading: { levels: [1, 2, 3] },
+        trailingNode: false,
+      }),
+    ],
+    content: '',
   })
 
   const json = useEditorState({
@@ -206,6 +227,21 @@ const Tiptap = () => {
   }
   const setMarginSide = (key: MarginKey, value: string) =>
     setMargins((prev) => ({ ...prev, [key]: value }))
+
+  // Insert a block at the end, swallowing any trailing empty textblocks
+  // (the source of stray blank paragraphs when TrailingNode was on).
+  const insertBlock = (node: JSONContent) => {
+    if (!editor) return
+    const { doc } = editor.state
+    let from = doc.content.size
+    for (let i = doc.childCount - 1; i >= 0; i -= 1) {
+      const child = doc.child(i)
+      if (!child.isTextblock || child.content.size > 0) break
+      from -= child.nodeSize
+    }
+    const range: Range = { from, to: doc.content.size }
+    editor.chain().focus().insertContentAt(range, node, { updateSelection: true }).run()
+  }
 
   return (
     <div style={{ textAlign: 'left', padding: 16 }}>
@@ -286,16 +322,25 @@ const Tiptap = () => {
           />
           Show grid
         </label>
-        {HEADING_LABELS[docType].map((label, i) => (
+        <div className="block-inserter" role="group" aria-label="Insert block">
           <button
-            key={label}
-            onClick={() =>
-              editor?.chain().focus().toggleHeading({ level: (i + 1) as 1 | 2 | 3 }).run()
-            }
+            type="button"
+            onClick={() => insertBlock(paragraphBlock())}
+            disabled={!editor}
           >
-            {label}
+            Normal text
           </button>
-        ))}
+          {HEADING_LABELS[docType].map((label, i) => (
+            <button
+              key={label}
+              type="button"
+              onClick={() => insertBlock(headingBlock((i + 1) as 1 | 2 | 3, label))}
+              disabled={!editor}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
       </div>
 
       <div className="editor-layout">
