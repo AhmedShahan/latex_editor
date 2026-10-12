@@ -1,0 +1,55 @@
+\documentclass{article}
+\usepackage[margin=1in]{geometry}
+\usepackage{xcolor}
+\usepackage{titlesec}
+\usepackage{lmodern}
+
+\definecolor{tabcolor}{RGB}{110,10,120}  % বেগুনি (box, লাইন ও শিরোনামের color)
+\definecolor{tabtext}{RGB}{255,255,255}  % box-এর ভেতরের লেখার color
+
+\setlength{\fboxsep}{4pt}
+
+% ---------- Section: "Section 1" box + বড় শিরোনাম ----------
+\newcommand{\sectionfmt}[1]{%
+  \noindent{\color{tabcolor}\rule{\linewidth}{0.8pt}}\par\nointerlineskip
+  \noindent\colorbox{tabcolor}{\strut\color{tabtext}\sffamily\bfseries\Large Section \thesection}%
+  \hspace{0.5em}{\color{tabcolor}\sffamily\bfseries\Large #1}\par}
+
+% ---------- Subsection: "1.1" box + মাঝারি শিরোনাম ----------
+\newcommand{\subsectionfmt}[1]{%
+  \noindent{\color{tabcolor}\rule{\linewidth}{0.6pt}}\par\nointerlineskip
+  \noindent\colorbox{tabcolor}{\strut\color{tabtext}\sffamily\bfseries\normalsize\thesubsection}%
+  \hspace{0.5em}{\color{tabcolor}\sffamily\bfseries\normalsize #1}\par}
+
+% ---------- Subsubsection: "1.1.1" box + ছোট শিরোনাম ----------
+\newcommand{\subsubsectionfmt}[1]{%
+  \noindent{\color{tabcolor}\rule{\linewidth}{0.5pt}}\par\nointerlineskip
+  \noindent\colorbox{tabcolor}{\strut\color{tabtext}\sffamily\bfseries\small\thesubsubsection}%
+  \hspace{0.5em}{\color{tabcolor}\sffamily\bfseries\small #1}\par}
+
+\titleformat{\section}[block]{}{}{0pt}{\sectionfmt}
+\titleformat{\subsection}[block]{}{}{0pt}{\subsectionfmt}
+\titleformat{\subsubsection}[block]{}{}{0pt}{\subsubsectionfmt}
+
+\titlespacing*{\section}{0pt}{3ex plus 1ex minus .2ex}{2ex plus .2ex}
+\titlespacing*{\subsection}{0pt}{2.5ex plus 1ex minus .2ex}{1.5ex plus .2ex}
+\titlespacing*{\subsubsection}{0pt}{2ex plus 1ex minus .2ex}{1.2ex plus .2ex}
+
+\begin{document}
+
+\section{Titre section 1}
+Your content for section 1 goes here.
+
+\subsection{Titre sous-section 1}
+Your content for subsection goes here.
+
+\subsubsection{Titre sous-sous-section 1}
+Your content for subsubsection goes here.
+
+\subsection{Another Subsection}
+More content here.
+
+\section{Second Section}
+Your content for section 2 goes here.
+
+\end{document}

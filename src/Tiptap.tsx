@@ -1,36 +1,22 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, useMemo } from 'react'
 import { useEditor, EditorContent, useEditorState } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
 import type { JSONContent, Range } from '@tiptap/core'
 import 'computer-modern/cmu-serif.css'
-
-type DocType = 'article' | 'report' | 'book'
-
-const HEADING_LABELS: Record<DocType, string[]> = {
-  article: ['Section', 'Subsection', 'Subsubsection'],
-  report: ['Chapter', 'Section', 'Subsection'],
-  book: ['Chapter', 'Section', 'Subsection'],
-}
-
-type PaperSize = 'a4paper' | 'letterpaper' | 'legalpaper' | 'a5paper'
-const PAPER_SIZES: Record<PaperSize, { label: string; widthMm: number; heightMm: number }> = {
-  a4paper: { label: 'A4 (210×297 mm)', widthMm: 210, heightMm: 297 },
-  letterpaper: { label: 'Letter (215.9×279.4 mm)', widthMm: 215.9, heightMm: 279.4 },
-  legalpaper: { label: 'Legal (215.9×355.6 mm)', widthMm: 215.9, heightMm: 355.6 },
-  a5paper: { label: 'A5 (148×210 mm)', widthMm: 148, heightMm: 210 },
-}
-const PAPER_ORDER: PaperSize[] = ['a4paper', 'letterpaper', 'legalpaper', 'a5paper']
-
-const FONT_SIZES = ['10pt', '11pt', '12pt'] as const
-type FontSize = (typeof FONT_SIZES)[number]
-
-const DEFAULT_MARGIN = '1in'
-const MARGIN_KEYS = ['top', 'bottom', 'left', 'right'] as const
-type MarginKey = (typeof MARGIN_KEYS)[number]
-type Margins = Record<MarginKey, string>
-type Geometry = { uniform: boolean; margin: string; margins: Margins }
-const MARGIN_LABELS: Record<MarginKey, string> = { top: 'Top', bottom: 'Bottom', left: 'Left', right: 'Right' }
-const DEFAULT_MARGINS: Margins = { top: DEFAULT_MARGIN, bottom: DEFAULT_MARGIN, left: DEFAULT_MARGIN, right: DEFAULT_MARGIN }
+import { SectionKitPicker } from './SectionKitPicker'
+import { useCompiledPreview } from './useCompiledPreview'
+import { getDesignById, extractPreamble, buildDocument } from './sectionkit'
+import type { DocType, PaperSize, FontSize, Geometry, MarginKey, Margins } from './types'
+import {
+  HEADING_LABELS,
+  PAPER_SIZES,
+  PAPER_ORDER,
+  FONT_SIZES,
+  DEFAULT_MARGIN,
+  MARGIN_KEYS,
+  MARGIN_LABELS,
+  DEFAULT_MARGINS,
+} from './types'
 
 type Mark = { type: string }
 type JNode = {
@@ -77,13 +63,28 @@ const renderBlock = (n: JNode, docType: DocType): string => {
   return `% unsupported: ${n.type}`
 }
 
-// Sanitize margin values so they never break the LaTeX optional argument.
 const sanitizeMargin = (value: string): string => {
   const cleaned = value.replaceAll('[', '').replaceAll(']', '').replace(/[\r\n]/g, '').trim()
   return cleaned || DEFAULT_MARGIN
 }
 
-// Build the geometry package option string.
+const MM_PER_UNIT: Record<string, number> = {
+  mm: 1,
+  cm: 10,
+  in: 25.4,
+  pt: 25.4 / 72,
+  pc: 25.4 / 6,
+  px: 25.4 / 96,
+}
+const DEFAULT_MARGIN_MM = 25.4
+
+const marginToMm = (value: string): number => {
+  const match = /^(-?\d*\.?\d+)\s*(mm|cm|in|pt|pc|px)$/i.exec(sanitizeMargin(value))
+  const mm = match ? Number(match[1]) * MM_PER_UNIT[match[2].toLowerCase()] : NaN
+  if (!Number.isFinite(mm)) return DEFAULT_MARGIN_MM
+  return Math.max(0, Math.round(mm * 1000) / 1000)
+}
+
 const geometryOptions = ({ uniform, margin, margins }: Geometry): string =>
   uniform
     ? `margin=${sanitizeMargin(margin)}`
@@ -94,39 +95,28 @@ const geometryOptions = ({ uniform, margin, margins }: Geometry): string =>
         `right=${sanitizeMargin(margins.right)}`,
       ].join(', ')
 
-// Convert a length like "1in" or "2.5cm" to millimetres. Falls back to 25.4mm
-// (≈1in) if the value is empty, unparseable, or uses an unknown unit.
-// Rounds to 3 decimal places and clamps negative values to 0.
-const MM_PER_UNIT: Record<string, number> = {
-  mm: 1,
-  cm: 10,
-  in: 25.4,
-  pt: 25.4 / 72,
-  pc: 25.4 / 6,
-  px: 25.4 / 96,
-}
-const DEFAULT_MARGIN_MM = 25.4
-const marginToMm = (value: string): number => {
-  const match = /^(-?\d*\.?\d+)\s*(mm|cm|in|pt|pc|px)$/i.exec(sanitizeMargin(value))
-  const mm = match ? Number(match[1]) * MM_PER_UNIT[match[2].toLowerCase()] : NaN
-  if (!Number.isFinite(mm)) return DEFAULT_MARGIN_MM
-  return Math.max(0, Math.round(mm * 1000) / 1000)
-}
-
 const toLatex = (
   doc: JNode,
   docType: DocType,
   paperSize: PaperSize,
   fontSize: FontSize,
   geometry: Geometry,
-) => {
+  designPreamble = '',
+): string => {
   const body = (doc.content ?? [])
     .map((n) => renderBlock(n, docType))
     .filter(Boolean)
     .join('\n\n')
 
-  const preamble = `\\usepackage[${geometryOptions(geometry)}]{geometry}`
-  return `\\documentclass[${fontSize}, ${paperSize}]{${docType}}\n\n${preamble}\n\n\\begin{document}\n\n${body}\n\n\\end{document}`
+  const geoOpts = geometryOptions(geometry)
+  return buildDocument({
+    docType,
+    paper: paperSize,
+    fontSize,
+    geometryOptions: geoOpts,
+    preamble: designPreamble,
+    body,
+  })
 }
 
 const BODY_PLACEHOLDER = 'Please insert your text here...'
@@ -143,6 +133,10 @@ const paragraphBlock = (): JSONContent => ({
   content: [{ type: 'text', text: BODY_PLACEHOLDER }],
 })
 
+const DEFAULT_DESIGN_ID = 'default'
+
+type PaneTab = 'preview' | 'code'
+
 const Tiptap = () => {
   const [docType, setDocType] = useState<DocType>('article')
   const [paperSize, setPaperSize] = useState<PaperSize>('a4paper')
@@ -153,8 +147,16 @@ const Tiptap = () => {
   const [showGrid, setShowGrid] = useState(false)
   const [scale, setScale] = useState(1)
   const [contentHeight, setContentHeight] = useState(0)
+  const [designId, setDesignId] = useState<string>(DEFAULT_DESIGN_ID)
+  const [activePaneTab, setActivePaneTab] = useState<PaneTab>('preview')
+  const [svgBlobUrls, setSvgBlobUrls] = useState<string[]>([])
+  const svgBlobUrlsRef = useRef<string[]>([])
   const previewRef = useRef<HTMLDivElement>(null)
   const pageRef = useRef<HTMLDivElement>(null)
+  const editorPaneRef = useRef<HTMLDivElement>(null)
+  const editorPageRef = useRef<HTMLDivElement>(null)
+  const [editorScale, setEditorScale] = useState(1)
+  const [editorContentHeight, setEditorContentHeight] = useState(0)
 
   const editor = useEditor({
     extensions: [
@@ -171,13 +173,40 @@ const Tiptap = () => {
     selector: ({ editor }) => (editor ? (editor.getJSON() as unknown as JNode) : null),
   })
   const geometry: Geometry = { uniform, margin, margins }
-  const code = json ? toLatex(json, docType, paperSize, fontSize, geometry) : ''
+
+  // Get selected design and extract its preamble
+  const design = useMemo(() => (designId === DEFAULT_DESIGN_ID ? null : getDesignById(designId)), [designId])
+  const designPreamble = useMemo(() => (design ? extractPreamble(design.raw) : ''), [design])
+
+  const code = json ? toLatex(json, docType, paperSize, fontSize, geometry, designPreamble) : ''
+
+  // Compile preview when code changes
+  const { pages, loading, error } = useCompiledPreview(code, activePaneTab === 'preview')
+
+  // Manage SVG blob URLs for preview
+  useEffect(() => {
+    // Revoke old URLs
+    for (const url of svgBlobUrlsRef.current) {
+      URL.revokeObjectURL(url)
+    }
+    const newUrls = pages.map((svg) => URL.createObjectURL(new Blob([svg], { type: 'image/svg+xml' })))
+    svgBlobUrlsRef.current = newUrls
+    // Syncing blob URLs is an external-system side effect; state is required
+    // so the preview can render the <img> elements.
+    // oxlint-disable-next-line react/set-state-in-effect
+    setSvgBlobUrls(newUrls)
+    return () => {
+      for (const url of newUrls) {
+        URL.revokeObjectURL(url)
+      }
+    }
+  }, [pages])
 
   const paper = PAPER_SIZES[paperSize]
   const pageWidthPx = (paper.widthMm / 25.4) * 96
   const pageHeightPx = (paper.heightMm / 25.4) * 96
 
-  // Compute CSS padding for the preview page from the margin values.
+  // Compute CSS padding for the editable page from the margin values.
   const pagePadding = uniform
     ? `${marginToMm(margin)}mm`
     : [
@@ -189,13 +218,11 @@ const Tiptap = () => {
         .map((mm) => `${mm}mm`)
         .join(' ')
 
-  // Scale the sheet down so the whole page stays visible inside the preview
-  // pane instead of being clipped by the LaTeX code panel beside it.
   useEffect(() => {
     const el = previewRef.current
     if (!el) return
     const update = () => {
-      const available = el.clientWidth - 32 // minus the pane's 16px padding
+      const available = el.clientWidth - 32
       setScale(available > 0 ? Math.min(1, available / pageWidthPx) : 1)
     }
     update()
@@ -204,8 +231,6 @@ const Tiptap = () => {
     return () => observer.disconnect()
   }, [pageWidthPx])
 
-  // Track the real rendered page height so the scaled wrapper reserves the
-  // correct vertical space (CSS transforms do not affect layout size).
   useEffect(() => {
     const el = pageRef.current
     if (!el) return
@@ -216,7 +241,30 @@ const Tiptap = () => {
     return () => observer.disconnect()
   }, [])
 
-  // Toggle uniform margins, carrying the value over.
+  // Scale the editable sheet to fit the left pane.
+  useEffect(() => {
+    const el = editorPaneRef.current
+    if (!el) return
+    const update = () => {
+      const available = el.clientWidth - 32
+      setEditorScale(available > 0 ? Math.min(1, available / pageWidthPx) : 1)
+    }
+    update()
+    const observer = new ResizeObserver(update)
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [pageWidthPx])
+
+  useEffect(() => {
+    const el = editorPageRef.current
+    if (!el) return
+    const update = () => setEditorContentHeight(el.offsetHeight)
+    update()
+    const observer = new ResizeObserver(update)
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [])
+
   const toggleUniform = (checked: boolean) => {
     setUniform(checked)
     if (checked) setMargin(sanitizeMargin(margins.top))
@@ -228,8 +276,6 @@ const Tiptap = () => {
   const setMarginSide = (key: MarginKey, value: string) =>
     setMargins((prev) => ({ ...prev, [key]: value }))
 
-  // Insert a block at the end, swallowing any trailing empty textblocks
-  // (the source of stray blank paragraphs when TrailingNode was on).
   const insertBlock = (node: JSONContent) => {
     if (!editor) return
     const { doc } = editor.state
@@ -245,7 +291,7 @@ const Tiptap = () => {
 
   return (
     <div style={{ textAlign: 'left', padding: 16 }}>
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 12 }}>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 12, alignItems: 'center' }}>
         <select
           value={docType}
           onChange={(e) => setDocType(e.target.value as DocType)}
@@ -322,6 +368,17 @@ const Tiptap = () => {
           />
           Show grid
         </label>
+
+        {/* SectionKit Picker */}
+        <SectionKitPicker
+          docType={docType}
+          paper={paperSize}
+          fontSize={fontSize}
+          geometry={geometry}
+          selectedDesignId={designId}
+          onSelectDesign={setDesignId}
+        />
+
         <div className="block-inserter" role="group" aria-label="Insert block">
           <button
             type="button"
@@ -344,17 +401,17 @@ const Tiptap = () => {
       </div>
 
       <div className="editor-layout">
-        <div ref={previewRef} className="editor-preview">
+        <div ref={editorPaneRef} className="editor-preview left-pane">
           <div
             style={{
-              width: pageWidthPx * scale,
-              height: Math.max(contentHeight, pageHeightPx) * scale,
+              width: pageWidthPx * editorScale,
+              height: Math.max(editorContentHeight, pageHeightPx) * editorScale,
               margin: '0 auto',
               position: 'relative',
             }}
           >
             <div
-              ref={pageRef}
+              ref={editorPageRef}
               className="latex-page"
               style={{
                 position: 'absolute',
@@ -380,7 +437,7 @@ const Tiptap = () => {
                 padding: pagePadding,
                 boxSizing: 'border-box',
                 boxShadow: '0 0 6px rgba(0,0,0,0.3)',
-                transform: `scale(${scale})`,
+                transform: `scale(${editorScale})`,
                 transformOrigin: 'top left',
               }}
             >
@@ -388,7 +445,82 @@ const Tiptap = () => {
             </div>
           </div>
         </div>
-        <pre className="editor-code">{code}</pre>
+
+        <div ref={previewRef} className="editor-preview right-pane">
+          <div className="pane-tabs" role="tablist">
+            <button
+              role="tab"
+              aria-selected={activePaneTab === 'preview'}
+              className={`pane-tab ${activePaneTab === 'preview' ? 'pane-tab-active' : ''}`}
+              onClick={() => setActivePaneTab('preview')}
+            >
+              Preview
+            </button>
+            <button
+              role="tab"
+              aria-selected={activePaneTab === 'code'}
+              className={`pane-tab ${activePaneTab === 'code' ? 'pane-tab-active' : ''}`}
+              onClick={() => setActivePaneTab('code')}
+            >
+              Code
+            </button>
+          </div>
+
+          {activePaneTab === 'preview' && (
+            <div className="pane-content">
+              {loading && <div className="compiling-indicator" aria-live="polite">Compiling…</div>}
+              {error && <div className="compile-error" role="alert">{error}</div>}
+              <div
+                style={{
+                  width: pageWidthPx * scale,
+                  height: Math.max(contentHeight, pageHeightPx) * scale,
+                  margin: '0 auto',
+                  position: 'relative',
+                }}
+              >
+                <div
+                  ref={pageRef}
+                  className="compiled-pages"
+                  style={{
+                    position: 'absolute',
+                    top: 0,
+                    left: 0,
+                    width: `${paper.widthMm}mm`,
+                    minHeight: `${paper.heightMm}mm`,
+                    transform: `scale(${scale})`,
+                    transformOrigin: 'top left',
+                  }}
+                >
+                  {svgBlobUrls.map((blobUrl, idx) => (
+                    <img
+                      key={idx}
+                      src={blobUrl}
+                      alt={`Page ${idx + 1}`}
+                      className="compiled-page"
+                      style={{
+                        width: '100%',
+                        height: 'auto',
+                        display: 'block',
+                        marginBottom: idx < svgBlobUrls.length - 1 ? '16px' : 0,
+                      }}
+                    />
+                  ))}
+                  {svgBlobUrls.length === 0 && !loading && !error && (
+                    <div style={{ padding: '2rem', textAlign: 'center', color: '#666' }}>
+                      No content to preview. Add sections and text in the editor.
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {activePaneTab === 'code' && (
+            <div className="pane-content">
+              <pre className="editor-code">{code}</pre>
+            </div>
+          )}
+        </div>
       </div>
     </div>
   )

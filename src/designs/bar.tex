@@ -1,0 +1,72 @@
+\documentclass{article}
+\usepackage[margin=1in]{geometry}
+\usepackage{xcolor}
+\usepackage{tikz}
+\usepackage{titlesec}
+\usepackage{amssymb}
+\usepackage{newpxtext,newpxmath}
+
+\definecolor{bar}{RGB}{38,50,72}        % গাঢ় বার
+\definecolor{fold}{RGB}{20,28,45}       % ভাঁজের ছায়া
+\definecolor{accent}{RGB}{240,165,0}    % হলুদ-কমলা ট্যাগ ও চিহ্ন
+\definecolor{ink}{RGB}{35,40,50}        % subsection/subsubsection শিরোনাম
+\definecolor{barText}{RGB}{255,255,255} % বারের ভেতরের লেখা
+
+% ---------- Section ----------
+\newcommand{\sectionfmt}[1]{%
+  \noindent
+  \begin{tikzpicture}[baseline=(base.base)]
+    \coordinate (base) at (0,0.3cm);
+    % বার (ডান-উপরের কোণা কাটা)
+    \fill[bar] (0,0) -- (\linewidth,0) -- (\linewidth,0.8cm)
+               -- (\linewidth-0.6cm,1.4cm) -- (0,1.4cm) -- cycle;
+    % ভাঁজ করা কোণা
+    \fill[fold] (\linewidth,0.8cm) -- (\linewidth-0.6cm,1.4cm)
+                -- (\linewidth-0.6cm,0.8cm) -- cycle;
+    % নম্বর ট্যাগ
+    \fill[accent] (0,0) rectangle (1.2cm,1.4cm);
+    \node[text=bar, inner sep=0pt, font=\bfseries\LARGE] at (0.6cm,0.7cm) {\thesection};
+    % শিরোনাম
+    \node[anchor=west, text=barText, inner sep=0pt, font=\bfseries\LARGE]
+      at (1.6cm,0.7cm) {#1};
+  \end{tikzpicture}\par}
+
+% ---------- Subsection ----------
+\newcommand{\subsectionfmt}[1]{%
+  \noindent{\color{accent}\Large$\bullet$}\hspace{0.4em}%
+  {\color{accent}\bfseries\Large\thesubsection}\hspace{0.6em}%
+  {\color{ink}\bfseries\Large #1}\par\nointerlineskip\vspace{0.4ex}
+  \noindent{\color{accent!60}\leaders\hbox to 5pt{\hss\rule{3pt}{0.6pt}\hss}\hfill}\par}
+
+% ---------- Subsubsection ----------
+\newcommand{\subsubsectionfmt}[1]{%
+  \noindent{\color{accent}$\blacktriangleright$}\hspace{0.4em}%
+  {\color{accent}\bfseries\large\thesubsubsection}\hspace{0.6em}%
+  {\color{ink}\bfseries\large #1}\par}
+
+\titleformat{\section}[block]{}{}{0pt}{\sectionfmt}
+\titleformat{\subsection}[block]{}{}{0pt}{\subsectionfmt}
+\titleformat{\subsubsection}[block]{}{}{0pt}{\subsubsectionfmt}
+
+\titlespacing*{\section}{0pt}{3.5ex plus 1ex minus .2ex}{3ex plus .2ex}
+\titlespacing*{\subsection}{0pt}{2.8ex plus 1ex minus .2ex}{1.5ex plus .2ex}
+\titlespacing*{\subsubsection}{0pt}{2.2ex plus 1ex minus .2ex}{1ex plus .2ex}
+
+\begin{document}
+
+\section{Introduction}
+Your content for section 1 goes here. Lorem ipsum dolor sit amet, consectetur adipiscing elit.
+
+\subsection{Background}
+Your content for subsection goes here.
+
+\subsubsection{Details}
+Your content for subsubsection goes here.
+
+\subsection{Another Subsection}
+More content here.
+
+\section{Methodology}
+Your content for section 2 goes here.
+
+\end{document}
