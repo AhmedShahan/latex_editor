@@ -1,4 +1,10 @@
-import { useEffect, useRef, useState, type MouseEvent } from 'react'
+import {
+  useEffect,
+  useRef,
+  useState,
+  type MouseEvent,
+  type PointerEvent as ReactPointerEvent,
+} from 'react'
 import { useEditor, EditorContent, useEditorState } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
 import 'computer-modern/cmu-serif.css'
@@ -239,6 +245,38 @@ const Tiptap = () => {
   const setMarginSide = (key: MarginKey, value: string) =>
     setMargins((prev) => ({ ...prev, [key]: value }))
 
+  // Drag a placed box to a new spot on the page. Its millimetre coordinates
+  // update live, so the LaTeX textblock moves with it.
+  const startDrag = (event: ReactPointerEvent<HTMLButtonElement>, t: PlacedText) => {
+    event.preventDefault()
+    event.stopPropagation()
+    const startX = event.clientX
+    const startY = event.clientY
+    const origX = t.xMm
+    const origY = t.yMm
+    const move = (e: PointerEvent) => {
+      const xMm = origX + ((e.clientX - startX) / scale / 96) * 25.4
+      const yMm = origY + ((e.clientY - startY) / scale / 96) * 25.4
+      setPlaced((prev) =>
+        prev.map((p) =>
+          p.id === t.id
+            ? {
+                ...p,
+                xMm: Math.min(Math.max(0, xMm), Math.max(0, paper.widthMm - 15)),
+                yMm: Math.min(Math.max(0, yMm), Math.max(0, paper.heightMm - 8)),
+              }
+            : p,
+        ),
+      )
+    }
+    const up = () => {
+      window.removeEventListener('pointermove', move)
+      window.removeEventListener('pointerup', up)
+    }
+    window.addEventListener('pointermove', move)
+    window.addEventListener('pointerup', up)
+  }
+
   // "Write text" tool: when armed, a click anywhere on the sheet drops a text
   // box at exactly that point (in page millimetres) and focuses it so typing
   // starts immediately. The box is emitted to LaTeX at the same coordinates.
@@ -441,26 +479,73 @@ const Tiptap = () => {
               {placed.map((t) => (
                 <div
                   key={t.id}
-                  id={`placed-${t.id}`}
                   data-placed="true"
-                  contentEditable
-                  suppressContentEditableWarning
-                  spellCheck={false}
-                  onMouseDown={(e) => e.stopPropagation()}
-                  onClick={(e) => e.stopPropagation()}
-                  onInput={(e) => updatePlaced(t.id, e.currentTarget.textContent ?? '')}
-                  onBlur={(e) => commitPlaced(t.id, e.currentTarget.textContent ?? '')}
                   style={{
                     position: 'absolute',
                     left: `${t.xMm}mm`,
                     top: `${t.yMm}mm`,
-                    minWidth: '15mm',
                     maxWidth: `${Math.max(20, paper.widthMm - t.xMm)}mm`,
-                    whiteSpace: 'pre-wrap',
-                    outline: '1px dashed rgba(170,59,255,0.5)',
-                    cursor: 'text',
                   }}
-                />
+                >
+                  <button
+                    type="button"
+                    onPointerDown={(e) => startDrag(e, t)}
+                    title="Drag to move this text"
+                    aria-label="Drag to move this text"
+                    style={{
+                      position: 'absolute',
+                      left: -20,
+                      top: 0,
+                      width: 16,
+                      height: 16,
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      padding: 0,
+                      border: 'none',
+                      borderRadius: 4,
+                      background: 'rgba(170,59,255,0.85)',
+                      color: '#fff',
+                      cursor: 'move',
+                      touchAction: 'none',
+                      lineHeight: 1,
+                    }}
+                  >
+                    <svg
+                      width="10"
+                      height="10"
+                      viewBox="0 0 10 10"
+                      fill="currentColor"
+                      aria-hidden="true"
+                    >
+                      <circle cx="2" cy="2" r="1" />
+                      <circle cx="5" cy="2" r="1" />
+                      <circle cx="8" cy="2" r="1" />
+                      <circle cx="2" cy="5" r="1" />
+                      <circle cx="5" cy="5" r="1" />
+                      <circle cx="8" cy="5" r="1" />
+                      <circle cx="2" cy="8" r="1" />
+                      <circle cx="5" cy="8" r="1" />
+                      <circle cx="8" cy="8" r="1" />
+                    </svg>
+                  </button>
+                  <div
+                    id={`placed-${t.id}`}
+                    contentEditable
+                    suppressContentEditableWarning
+                    spellCheck={false}
+                    onMouseDown={(e) => e.stopPropagation()}
+                    onClick={(e) => e.stopPropagation()}
+                    onInput={(e) => updatePlaced(t.id, e.currentTarget.textContent ?? '')}
+                    onBlur={(e) => commitPlaced(t.id, e.currentTarget.textContent ?? '')}
+                    style={{
+                      minWidth: '15mm',
+                      whiteSpace: 'pre-wrap',
+                      outline: '1px dashed rgba(170,59,255,0.5)',
+                      cursor: 'text',
+                    }}
+                  />
+                </div>
               ))}
             </div>
           </div>
