@@ -417,6 +417,10 @@ const Tiptap = () => {
                   ? {
                       backgroundImage: `repeating-linear-gradient(0deg, #eee 0, #eee 1px, transparent 1px, transparent 20px), repeating-linear-gradient(90deg, #eee 0, #eee 1px, transparent 1px, transparent 20px)`,
                       backgroundSize: '20px 20px',
+                      // Start the grid at the margin and clip it there, so the
+                      // grid fills only the text area and the margins stay blank.
+                      backgroundOrigin: 'content-box',
+                      backgroundClip: 'content-box',
                     }
                   : {}),
                 color: '#000',
