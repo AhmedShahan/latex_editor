@@ -1,0 +1,54 @@
+<!doctype html>
+<html>
+<body>
+<iframe id="f" src="/" style="width:1280px;height:900px;border:0"></iframe>
+<pre id="out">pending</pre>
+<script>
+const f = document.getElementById('f')
+f.onload = () => {
+  let tries = 0
+  const waitPage = () => {
+    const d = f.contentDocument
+    if (!d.querySelector('.latex-page') && tries++ < 100) { setTimeout(waitPage, 100); return }
+    run(d)
+  }
+  const run = (d) => {
+    const out = []
+    const btn = [...d.querySelectorAll('button')].find((b) => /write text/i.test(b.textContent || ''))
+    btn.click()
+    setTimeout(() => {
+      const page = d.querySelector('.latex-page')
+      const r = page.getBoundingClientRect()
+      page.dispatchEvent(new f.contentWindow.MouseEvent('click', {
+        bubbles: true, cancelable: true, clientX: r.left + 150, clientY: r.top + 220,
+      }))
+      setTimeout(() => {
+        const box = d.querySelector('[data-placed]')
+        out.push('box created: ' + !!box)
+        out.push('code before typing has textblock: ' + d.querySelector('.editor-code').textContent.includes('textblock'))
+        // type first chunk, dispatch input, WITHOUT blurring
+        box.textContent = 'LIVE'
+        box.dispatchEvent(new f.contentWindow.InputEvent('input', { bubbles: true }))
+        setTimeout(() => {
+          const c1 = d.querySelector('.editor-code').textContent
+          out.push('after typing "LIVE" (no blur) code has LIVE: ' + c1.includes('LIVE'))
+          // type more
+          box.textContent = 'LIVE_TEXT_NOW'
+          box.dispatchEvent(new f.contentWindow.InputEvent('input', { bubbles: true }))
+          setTimeout(() => {
+            const c2 = d.querySelector('.editor-code').textContent
+            out.push('after more (no blur) code has LIVE\\_TEXT\\_NOW: ' + c2.includes('LIVE\\_TEXT\\_NOW'))
+            out.push('still focused: ' + (d.activeElement === box))
+            out.push('box text preserved in DOM: ' + JSON.stringify(box.textContent))
+            done(out)
+          }, 250)
+        }, 250)
+      }, 400)
+    }, 400)
+  }
+  const done = (out) => { document.getElementById('out').textContent = out.join('\n') }
+  waitPage()
+}
+</script>
+</body>
+</html>

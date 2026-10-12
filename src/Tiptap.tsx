@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type MouseEvent } from 'react'
 import { useEditor, EditorContent, useEditorState } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
 import 'computer-modern/cmu-serif.css'
@@ -21,6 +21,9 @@ const PAPER_ORDER: PaperSize[] = ['a4paper', 'letterpaper', 'legalpaper', 'a5pap
 
 const FONT_SIZES = ['10pt', '11pt', '12pt'] as const
 type FontSize = (typeof FONT_SIZES)[number]
+
+// A text box positioned on the page, in millimetres from the paper's top-left.
+type PlacedText = { id: number; xMm: number; yMm: number; text: string }
 
 type Mark = { type: string }
 type JNode = {
@@ -67,12 +70,32 @@ const renderBlock = (n: JNode, docType: DocType): string => {
   return `% unsupported: ${n.type}`
 }
 
-const toLatex = (doc: JNode, docType: DocType, paperSize: PaperSize, fontSize: FontSize) => {
+const toLatex = (
+  doc: JNode,
+  docType: DocType,
+  paperSize: PaperSize,
+  fontSize: FontSize,
+  placed: PlacedText[],
+) => {
   const body = (doc.content ?? [])
     .map((n) => renderBlock(n, docType))
     .filter(Boolean)
     .join('\n\n')
-  return `\\documentclass[${fontSize}, ${paperSize}]{${docType}}\n\n\\begin{document}\n\n${body}\n\n\\end{document}`
+
+  // Absolutely-positioned text boxes, using the textpos package. In absolute
+  // mode its coordinates are measured from the top-left of the paper, which
+  // matches how the boxes are placed in the preview.
+  const positioned = placed
+    .filter((t) => t.text.trim().length > 0)
+    .map((t) => {
+      const widthMm = Math.max(20, PAPER_SIZES[paperSize].widthMm - t.xMm)
+      return `\\begin{textblock*}{${widthMm.toFixed(1)}mm}(${t.xMm.toFixed(1)}mm,${t.yMm.toFixed(1)}mm)\n${escapeLatex(t.text)}\n\\end{textblock*}`
+    })
+    .join('\n\n')
+
+  const preamble = positioned ? '\\usepackage[absolute,overlay]{textpos}\n\n' : ''
+  const content = [body, positioned].filter(Boolean).join('\n\n')
+  return `\\documentclass[${fontSize}, ${paperSize}]{${docType}}\n\n${preamble}\\begin{document}\n\n${content}\n\n\\end{document}`
 }
 
 const Tiptap = () => {
@@ -80,10 +103,14 @@ const Tiptap = () => {
   const [paperSize, setPaperSize] = useState<PaperSize>('a4paper')
   const [fontSize, setFontSize] = useState<FontSize>('12pt')
   const [showGrid, setShowGrid] = useState(false)
+  const [writeMode, setWriteMode] = useState(false)
+  const [placed, setPlaced] = useState<PlacedText[]>([])
   const [scale, setScale] = useState(1)
   const [contentHeight, setContentHeight] = useState(0)
   const previewRef = useRef<HTMLDivElement>(null)
   const pageRef = useRef<HTMLDivElement>(null)
+  const nextId = useRef(1)
+  const focusId = useRef<number | null>(null)
 
   const editor = useEditor({
     extensions: [StarterKit.configure({ heading: { levels: [1, 2, 3] } })],
@@ -94,7 +121,7 @@ const Tiptap = () => {
     editor,
     selector: ({ editor }) => (editor ? (editor.getJSON() as unknown as JNode) : null),
   })
-  const code = json ? toLatex(json, docType, paperSize, fontSize) : ''
+  const code = json ? toLatex(json, docType, paperSize, fontSize, placed) : ''
 
   const paper = PAPER_SIZES[paperSize]
   const pageWidthPx = (paper.widthMm / 25.4) * 96
@@ -126,6 +153,50 @@ const Tiptap = () => {
     observer.observe(el)
     return () => observer.disconnect()
   }, [])
+
+  // Live-update a placed box as the user types, so the LaTeX code refreshes
+  // immediately, and drop the box on blur if nothing was entered.
+  const updatePlaced = (id: number, text: string) => {
+    setPlaced((prev) => prev.map((t) => (t.id === id ? { ...t, text } : t)))
+  }
+  const commitPlaced = (id: number, text: string) => {
+    if (!text.trim()) setPlaced((prev) => prev.filter((t) => t.id !== id))
+  }
+
+  // "Write text" tool: when armed, a click anywhere on the sheet drops a text
+  // box at exactly that point (in page millimetres) and focuses it so typing
+  // starts immediately. The box is emitted to LaTeX at the same coordinates.
+  const handleWriteText = (event: MouseEvent<HTMLDivElement>) => {
+    if (!writeMode || !pageRef.current) return
+    if ((event.target as HTMLElement).closest('[data-placed]')) return
+    event.preventDefault()
+    const rect = pageRef.current.getBoundingClientRect()
+    const xPx = (event.clientX - rect.left) / scale
+    const yPx = (event.clientY - rect.top) / scale
+    const id = nextId.current++
+    focusId.current = id
+    setPlaced((prev) => [
+      ...prev,
+      { id, xMm: (xPx / 96) * 25.4, yMm: (yPx / 96) * 25.4, text: '' },
+    ])
+    setWriteMode(false)
+  }
+
+  // After a new box is rendered, focus it and put the caret at the end.
+  useEffect(() => {
+    const id = focusId.current
+    if (id == null) return
+    const el = document.getElementById(`placed-${id}`)
+    if (!el) return
+    el.focus()
+    const range = document.createRange()
+    range.selectNodeContents(el)
+    range.collapse(false)
+    const selection = window.getSelection()
+    selection?.removeAllRanges()
+    selection?.addRange(range)
+    focusId.current = null
+  })
 
   return (
     <div style={{ textAlign: 'left', padding: 16 }}>
@@ -172,6 +243,35 @@ const Tiptap = () => {
           />
           Show grid
         </label>
+        <button
+          type="button"
+          onClick={() => setWriteMode((v) => !v)}
+          aria-pressed={writeMode}
+          title="Write text: click this, then click anywhere on the page to place text exactly there"
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: 6,
+            cursor: 'pointer',
+            ...(writeMode ? { background: '#aa3bff', color: '#fff', borderColor: '#aa3bff' } : {}),
+          }}
+        >
+          <svg
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden="true"
+          >
+            <path d="M12 20h9" />
+            <path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z" />
+          </svg>
+          {writeMode ? 'Click on the page…' : 'Write text'}
+        </button>
         {HEADING_LABELS[docType].map((label, i) => (
           <button
             key={label}
@@ -197,6 +297,7 @@ const Tiptap = () => {
             <div
               ref={pageRef}
               className="latex-page"
+              onClick={handleWriteText}
               style={{
                 position: 'absolute',
                 top: 0,
@@ -219,9 +320,34 @@ const Tiptap = () => {
                 boxShadow: '0 0 6px rgba(0,0,0,0.3)',
                 transform: `scale(${scale})`,
                 transformOrigin: 'top left',
+                cursor: writeMode ? 'crosshair' : undefined,
               }}
             >
               <EditorContent editor={editor} />
+              {placed.map((t) => (
+                <div
+                  key={t.id}
+                  id={`placed-${t.id}`}
+                  data-placed="true"
+                  contentEditable
+                  suppressContentEditableWarning
+                  spellCheck={false}
+                  onMouseDown={(e) => e.stopPropagation()}
+                  onClick={(e) => e.stopPropagation()}
+                  onInput={(e) => updatePlaced(t.id, e.currentTarget.textContent ?? '')}
+                  onBlur={(e) => commitPlaced(t.id, e.currentTarget.textContent ?? '')}
+                  style={{
+                    position: 'absolute',
+                    left: `${t.xMm}mm`,
+                    top: `${t.yMm}mm`,
+                    minWidth: '15mm',
+                    maxWidth: `${Math.max(20, paper.widthMm - t.xMm)}mm`,
+                    whiteSpace: 'pre-wrap',
+                    outline: '1px dashed rgba(170,59,255,0.5)',
+                    cursor: 'text',
+                  }}
+                />
+              ))}
             </div>
           </div>
         </div>
