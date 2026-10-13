@@ -1,120 +1,30 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
-import { getDesigns, type Design, extractPreamble, buildDocument, SAMPLE_BODY } from './sectionkit'
-import type { DocType, PaperSize, FontSize, Geometry } from './types'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { getDesigns } from './sectionkit'
+
+const DEFAULT_DESIGN_ID = 'default'
+
+/** Keep this in sync with the dropdown's outside margin in index.css. */
+const VIEWPORT_MARGIN = 8
 
 interface SectionKitPickerProps {
-  docType: DocType
-  paper: PaperSize
-  fontSize: FontSize
-  geometry: Geometry
   selectedDesignId: string
   onSelectDesign: (designId: string) => void
 }
 
-const DEFAULT_DESIGN_ID = 'default'
-
 /**
- * Lazy thumbnail cache: Map<designId, { blobUrl: string; revoked: boolean }>
- * Compiled on first open, memoized at module level.
- */
-const thumbnailCache = new Map<string, { blobUrl: string; revoked: boolean }>()
-
-/**
- * Build the full LaTeX document for a design's thumbnail.
- */
-function buildThumbnailLatex(
-  design: Design,
-  docType: DocType,
-  paper: PaperSize,
-  fontSize: FontSize,
-  geometry: Geometry
-): string {
-  const preamble = extractPreamble(design.raw)
-  const geometryOptions = buildGeometryOptions(geometry)
-  return buildDocument({
-    docType,
-    paper,
-    fontSize,
-    geometryOptions,
-    preamble,
-    body: SAMPLE_BODY,
-  })
-}
-
-/**
- * Build geometry options string from Geometry object (mirrors Tiptap logic).
- */
-function buildGeometryOptions(geometry: Geometry): string {
-  const { uniform, margin, margins } = geometry
-  const sanitize = (value: string) => value.replaceAll('[', '').replaceAll(']', '').replace(/[\r\n]/g, '').trim() || '1in'
-  if (uniform) {
-    return `margin=${sanitize(margin)}`
-  }
-  return [
-    `top=${sanitize(margins.top)}`,
-    `bottom=${sanitize(margins.bottom)}`,
-    `left=${sanitize(margins.left)}`,
-    `right=${sanitize(margins.right)}`,
-  ].join(', ')
-}
-
-/**
- * Compile a thumbnail for a design if not already cached.
- */
-async function ensureThumbnail(
-  design: Design,
-  docType: DocType,
-  paper: PaperSize,
-  fontSize: FontSize,
-  geometry: Geometry
-): Promise<string | null> {
-  if (thumbnailCache.has(design.id)) {
-    const cached = thumbnailCache.get(design.id)!
-    if (!cached.revoked) return cached.blobUrl
-  }
-
-  const latex = buildThumbnailLatex(design, docType, paper, fontSize, geometry)
-
-  try {
-    const response = await fetch('/api/sectionkit/compile', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ latex }),
-    })
-
-    if (!response.ok) return null
-
-    const data = await response.json()
-    if (data.error || !data.pages?.[0]) return null
-
-    const svg = data.pages[0]
-    const blob = new Blob([svg], { type: 'image/svg+xml' })
-    const blobUrl = URL.createObjectURL(blob)
-    thumbnailCache.set(design.id, { blobUrl, revoked: false })
-    return blobUrl
-  } catch {
-    return null
-  }
-}
-
-/**
- * SectionKit design picker: button + card grid with live thumbnails.
+ * SectionKit design picker: button + card grid with static preview images.
+ * No runtime compilation — previews are bundled SVGs generated at build time
+ * by `scripts/generate-sectionkit-previews.mjs`.
  */
 export function SectionKitPicker({
-  docType,
-  paper,
-  fontSize,
-  geometry,
   selectedDesignId,
   onSelectDesign,
 }: SectionKitPickerProps) {
   const [open, setOpen] = useState(false)
-  const [thumbnails, setThumbnails] = useState<Map<string, string>>(new Map())
-  const [loadingThumbs, setLoadingThumbs] = useState<Set<string>>(new Set())
   const designs = useMemo(() => getDesigns(), [])
   const pickerRef = useRef<HTMLDivElement>(null)
-  // Designs whose thumbnail compile failed; never retried automatically.
-  const failedThumbs = useRef<Set<string>>(new Set())
+  const triggerRef = useRef<HTMLButtonElement>(null)
+  const dropdownRef = useRef<HTMLDivElement>(null)
 
   // Close on outside click
   useEffect(() => {
@@ -129,49 +39,49 @@ export function SectionKitPicker({
     return () => document.removeEventListener('mousedown', handleClickOutside)
   }, [open])
 
-  // Load thumbnails lazily when picker opens
-  useEffect(() => {
+  // The card grid is wide, so keep the dropdown inside the viewport instead of
+  // letting it stick out of the right edge.
+  useLayoutEffect(() => {
     if (!open) return
-    const loadAll = async () => {
-      for (const design of designs) {
-        if (design.id === DEFAULT_DESIGN_ID) continue
-        if (thumbnails.has(design.id) || loadingThumbs.has(design.id) || failedThumbs.current.has(design.id)) continue
-        setLoadingThumbs((prev) => new Set(prev).add(design.id))
-        const blobUrl = await ensureThumbnail(design, docType, paper, fontSize, geometry)
-        if (blobUrl) {
-          setThumbnails((prev) => new Map(prev).set(design.id, blobUrl))
-        } else {
-          failedThumbs.current.add(design.id)
-        }
-        setLoadingThumbs((prev) => {
-          const next = new Set(prev)
-          next.delete(design.id)
-          return next
-        })
-      }
+    const picker = pickerRef.current
+    const trigger = triggerRef.current
+    const dropdown = dropdownRef.current
+    if (!picker || !trigger || !dropdown) return
+
+    const place = () => {
+      dropdown.style.left = '0px'
+      const limit = document.documentElement.clientWidth - dropdown.offsetWidth - VIEWPORT_MARGIN
+      const wanted = Math.min(trigger.getBoundingClientRect().left, Math.max(VIEWPORT_MARGIN, limit))
+      dropdown.style.left = `${wanted - picker.getBoundingClientRect().left}px`
     }
-    loadAll()
-  }, [open, designs, docType, paper, fontSize, geometry, thumbnails, loadingThumbs])
+
+    place()
+    window.addEventListener('resize', place)
+    return () => window.removeEventListener('resize', place)
+  }, [open])
 
   const handleSelect = (designId: string) => {
     onSelectDesign(designId)
     setOpen(false)
   }
 
+  const selectedDesign = designs.find((d) => d.id === selectedDesignId)
+
   return (
     <div className="sectionkit-picker" ref={pickerRef}>
       <button
         type="button"
+        ref={triggerRef}
         className="sectionkit-trigger"
         onClick={() => setOpen((prev) => !prev)}
         aria-haspopup="true"
         aria-expanded={open}
       >
-        SectionKit: {selectedDesignId === DEFAULT_DESIGN_ID ? 'Default' : getDesignByName(designs, selectedDesignId)?.name ?? selectedDesignId}
+        SectionKit: {selectedDesignId === DEFAULT_DESIGN_ID ? 'Default' : selectedDesign?.name ?? selectedDesignId}
       </button>
 
       {open && (
-        <div className="sectionkit-dropdown" role="menu">
+        <div className="sectionkit-dropdown" role="menu" ref={dropdownRef}>
           <div className="sectionkit-card" role="menuitem" onClick={() => handleSelect(DEFAULT_DESIGN_ID)}>
             <div className="sectionkit-card-thumb default-thumb" />
             <span className="sectionkit-card-name">Default</span>
@@ -185,17 +95,14 @@ export function SectionKitPicker({
               onClick={() => handleSelect(design.id)}
             >
               <div className="sectionkit-card-thumb">
-                {loadingThumbs.has(design.id) && <span className="sectionkit-thumb-loading">…</span>}
-                {thumbnails.has(design.id) && (
+                {design.previewUrl ? (
                   <img
-                    src={thumbnails.get(design.id)!}
+                    src={design.previewUrl}
                     alt={`${design.name} preview`}
                     className="sectionkit-thumb-img"
-                    loading="lazy"
                   />
-                )}
-                {!thumbnails.has(design.id) && !loadingThumbs.has(design.id) && (
-                  <span className="sectionkit-thumb-placeholder">⟳</span>
+                ) : (
+                  <span className="sectionkit-thumb-missing">—</span>
                 )}
               </div>
               <span className="sectionkit-card-name">{design.name}</span>
@@ -206,18 +113,4 @@ export function SectionKitPicker({
       )}
     </div>
   )
-}
-
-function getDesignByName(designs: Design[], id: string): Design | undefined {
-  return designs.find((d) => d.id === id)
-}
-
-// Cleanup on unmount (module-level)
-if (typeof window !== 'undefined') {
-  window.addEventListener('beforeunload', () => {
-    for (const { blobUrl, revoked } of thumbnailCache.values()) {
-      if (!revoked) URL.revokeObjectURL(blobUrl)
-    }
-    thumbnailCache.clear()
-  })
 }

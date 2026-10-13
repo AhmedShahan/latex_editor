@@ -10,10 +10,18 @@ const designModules = import.meta.glob<string | { default: string }>('./designs/
   eager: true,
 })
 
+// Load static preview SVGs as URLs (hashed by Vite for caching)
+const previewModules = import.meta.glob<string>('./assets/sectionkit/*.svg', {
+  query: '?url',
+  import: 'default',
+  eager: true,
+})
+
 export interface Design {
   id: string
   name: string
   raw: string
+  previewUrl?: string
 }
 
 /**
@@ -26,16 +34,18 @@ function titleCaseFilename(filename: string): string {
 
 /**
  * Get all available designs, sorted with "Default" first, then alphabetically.
+ * Attaches previewUrl from the generated SVG assets.
  */
 export function getDesigns(): Design[] {
   const designs: Design[] = []
   for (const [path, mod] of Object.entries(designModules)) {
     const filename = path.split('/').pop() ?? path
-    designs.push({
-      id: filename.replace(/\.tex$/, ''),
-      name: titleCaseFilename(filename),
-      raw: typeof mod === 'string' ? mod : mod.default,
-    })
+    const id = filename.replace(/\.tex$/, '')
+    const raw = typeof mod === 'string' ? mod : mod.default
+    // Match preview by design id (e.g., bar -> ./assets/sectionkit/bar.svg)
+    const previewKey = Object.keys(previewModules).find((k) => k.includes(`/${id}.svg`))
+    const previewUrl = previewKey ? previewModules[previewKey] : undefined
+    designs.push({ id, name: titleCaseFilename(filename), raw, previewUrl })
   }
   designs.sort((a, b) => a.name.localeCompare(b.name))
   return designs
@@ -100,10 +110,3 @@ export function buildDocument(params: {
   parts.push('\\end{document}')
   return parts.join('\n\n')
 }
-
-/**
- * Sample body for thumbnail generation.
- */
-export const SAMPLE_BODY = `\\section{Sample Section}
-\\subsection{Sample Subsection}
-\\subsubsection{Sample Subsubsection}`

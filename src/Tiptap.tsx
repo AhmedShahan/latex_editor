@@ -371,10 +371,6 @@ const Tiptap = () => {
 
         {/* SectionKit Picker */}
         <SectionKitPicker
-          docType={docType}
-          paper={paperSize}
-          fontSize={fontSize}
-          geometry={geometry}
           selectedDesignId={designId}
           onSelectDesign={setDesignId}
         />
