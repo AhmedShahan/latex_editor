@@ -4,8 +4,15 @@
  * Auto-measures ink extents to crop/zoom to the heading region.
  * Uses the design's own rich sample body (not the bare SAMPLE_BODY).
  *
- * Output: src/assets/sectionkit/{bar,tab,ribbon}.svg
- * Prints the shared crop dimensions and aspect-ratio for CSS sync.
+ * Adding a design is a 2-step flow:
+ *   1. Drop a complete `src/designs/<id>.tex` (with \begin{document}/\end{document}).
+ *   2. Run `node scripts/generate-sectionkit-previews.mjs`.
+ * All `src/designs/*.tex` are auto-discovered; previews for designs that no
+ * longer exist are removed automatically. CSS sizes images from each SVG's
+ * intrinsic ratio, so no manual `aspect-ratio` sync is needed.
+ *
+ * Output: src/assets/sectionkit/<id>.svg (one per discovered design).
+ * Prints the shared crop dimensions and aspect-ratio for reference.
  */
 
 import { promises as fs } from 'node:fs'
@@ -30,8 +37,51 @@ const PAD_Y = 8   // pt padding top/bottom
 const MIN_CROP_HEIGHT = 240 // pt - minimum crop height to ensure all designs have same height
 const DPI = 72    // pdftoppm -r 72 gives 1px = 1pt
 
-// Design IDs to process
-const DESIGN_IDS = ['bar', 'tab', 'ribbon']
+/**
+ * Discover design IDs from src/designs/*.tex files.
+ * Returns sorted array of design IDs (filename without .tex extension).
+ * Throws if directory doesn't exist or no designs found.
+ */
+async function discoverDesignIds() {
+  try {
+    const entries = await fs.readdir(DESIGNS_DIR, { withFileTypes: true })
+    const ids = entries
+      .filter((e) => e.isFile() && e.name.endsWith('.tex'))
+      .map((e) => e.name.slice(0, -4))
+      .sort()
+    if (ids.length === 0) {
+      throw new Error(`No .tex design files found in ${DESIGNS_DIR}`)
+    }
+    return ids
+  } catch (err) {
+    if (err.code === 'ENOENT') {
+      throw new Error(`Designs directory not found: ${DESIGNS_DIR}`)
+    }
+    throw err
+  }
+}
+
+/**
+ * Remove stale preview SVGs in assets dir whose design ID no longer exists.
+ */
+async function removeStalePreviews(validIds) {
+  try {
+    const entries = await fs.readdir(ASSETS_DIR, { withFileTypes: true })
+    const validSet = new Set(validIds)
+    for (const entry of entries) {
+      if (entry.isFile() && entry.name.endsWith('.svg')) {
+        const id = entry.name.slice(0, -4)
+        if (!validSet.has(id)) {
+          const stalePath = join(ASSETS_DIR, entry.name)
+          await fs.unlink(stalePath)
+          console.log(`  Removed stale preview: ${stalePath}`)
+        }
+      }
+    }
+  } catch (err) {
+    if (err.code !== 'ENOENT') throw err
+  }
+}
 
 /**
  * Read a design .tex file and extract its preamble and body.
@@ -223,19 +273,41 @@ function cropSvg(svg, viewBox) {
 }
 
 async function main() {
+  // Discover design IDs FIRST (before touching assets) so empty/missing designs dir is non-destructive
+  const designIds = await discoverDesignIds()
+  console.log(`Discovered ${designIds.length} design(s): ${designIds.join(', ')}`)
+
   await mkdir(ASSETS_DIR, { recursive: true })
 
   const allInkBoxes = []
   const pageHeights = []
   const svgs = new Map()
+  let hadError = false
 
   // First pass: compile each design, get ink box
-  for (const id of DESIGN_IDS) {
+  for (const id of designIds) {
     console.log(`\n=== Processing ${id} ===`)
     const designPath = join(DESIGNS_DIR, `${id}.tex`)
-    const raw = await fs.readFile(designPath, 'utf8')
-    const { preamble, body } = parseDesign(raw)
-    const latex = buildPreviewLatex(preamble, body)
+    let raw
+    try {
+      raw = await fs.readFile(designPath, 'utf8')
+    } catch (err) {
+      console.error(`  Failed to read ${designPath}: ${err.message}`)
+      hadError = true
+      continue
+    }
+
+    let preamble, body, latex
+    try {
+      const parsed = parseDesign(raw)
+      preamble = parsed.preamble
+      body = parsed.body
+      latex = buildPreviewLatex(preamble, body)
+    } catch (err) {
+      console.error(`  Failed to parse design ${id}: ${err.message}`)
+      hadError = true
+      continue
+    }
 
     const workDir = await mkdtemp(join(tmpdir(), `sectionkit-${id}-`))
     try {
@@ -252,9 +324,17 @@ async function main() {
       const inkBox = await getInkBox(pdfPath, workDir)
       console.log(`  Ink box (pt, top-left): x=${inkBox.minX}-${inkBox.maxX}, y=${inkBox.minY}-${inkBox.maxY}`)
       allInkBoxes.push(inkBox)
+    } catch (err) {
+      console.error(`  Failed to generate preview for ${id}: ${err.message}`)
+      hadError = true
     } finally {
       await rm(workDir, { recursive: true, force: true })
     }
+  }
+
+  if (allInkBoxes.length === 0) {
+    console.error('No designs successfully processed. Keeping existing previews.')
+    process.exit(1)
   }
 
   // Compute shared crop box from ink boxes only
@@ -280,23 +360,36 @@ async function main() {
 
   // Generate final cropped SVGs
   const viewBox = [minX, minY, cropWidth, cropHeight]
-  for (const id of DESIGN_IDS) {
-    const cropped = cropSvg(svgs.get(id), viewBox)
+  for (const id of designIds) {
+    const svg = svgs.get(id)
+    if (!svg) {
+      console.log(`  Skipping ${id} (previous SVG kept)`)
+      continue
+    }
+    const cropped = cropSvg(svg, viewBox)
     const outPath = join(ASSETS_DIR, `${id}.svg`)
     await fs.writeFile(outPath, cropped, 'utf8')
     console.log(`  Written: ${outPath}`)
   }
 
-  // Compute aspect ratio for CSS (width/height)
+  // Remove stale previews for designs that no longer exist
+  await removeStalePreviews(designIds)
+
+  // Shared crop ratio (informational - the SVGs carry their own intrinsic size)
   const aspectRatio = cropWidth / cropHeight
-  console.log(`\n=== CSS aspect-ratio ===`)
-  console.log(`  aspect-ratio: ${cropWidth} / ${cropHeight}  (≈ ${aspectRatio.toFixed(4)})`)
-  console.log(`  Use in CSS: aspect-ratio: ${cropWidth} / ${cropHeight};`)
+  console.log(`\n=== Preview crop ===`)
+  console.log(`  viewBox: ${viewBox.join(' ')}`)
+  console.log(`  ratio: ${cropWidth} / ${cropHeight}  (≈ ${aspectRatio.toFixed(4)})`)
 
   // Also output natural image size at 96 DPI (for verification)
   const naturalWidth = Math.round(cropWidth * 96 / 72)
   const naturalHeight = Math.round(cropHeight * 96 / 72)
   console.log(`  Natural size at 96 DPI: ${naturalWidth}×${naturalHeight} px`)
+
+  if (hadError) {
+    console.error('\nSome designs failed to process. Exiting with error.')
+    process.exit(1)
+  }
 }
 
 main().catch(err => {

@@ -1,0 +1,61 @@
+\documentclass{article}
+\usepackage[margin=1in]{geometry}
+\usepackage{xcolor}
+\usepackage{tikz}
+\usepackage{titlesec}
+\usepackage{newpxtext,newpxmath}
+
+\definecolor{accent}{RGB}{200,90,30}   % কমলা-বাদামি (নম্বর, দাগ, লাইন)
+\definecolor{ink}{RGB}{35,40,50}       % শিরোনামের color
+
+% ---------- Section ----------
+\newcommand{\sectionfmt}[1]{%
+  \noindent
+  \begin{tikzpicture}[baseline=(n.base)]
+    \node[anchor=base west, inner sep=0pt, text=accent!30,
+          font=\fontsize{46}{46}\selectfont\bfseries] (n) at (0,0) {\thesection};
+    \node[anchor=base west, inner sep=0pt, text=ink, font=\bfseries\huge]
+      at ([xshift=0.35cm]n.base east) {#1};
+    \draw[accent!50, line width=0.6pt]
+      ([yshift=-0.3cm]n.south west) -- ++(\linewidth,0);
+    \fill[accent]
+      ([xshift=\linewidth-0.35cm,yshift=-0.3cm]n.south west) rectangle ++(0.35cm,0.14cm);
+  \end{tikzpicture}\par}
+
+% ---------- Subsection ----------
+\newcommand{\subsectionfmt}[1]{%
+  \noindent{\color{accent}\vrule width 3pt height 1.1em depth 0.35em}%
+  \hspace{0.6em}{\color{accent}\bfseries\Large\thesubsection}%
+  \hspace{0.6em}{\color{ink}\bfseries\Large #1}\par}
+
+% ---------- Subsubsection ----------
+\newcommand{\subsubsectionfmt}[1]{%
+  \noindent{\color{accent}\bfseries\large\thesubsubsection}%
+  \hspace{0.6em}{\color{ink}\itshape\bfseries\large #1}\par}
+
+\titleformat{\section}[block]{}{}{0pt}{\sectionfmt}
+\titleformat{\subsection}[block]{}{}{0pt}{\subsectionfmt}
+\titleformat{\subsubsection}[block]{}{}{0pt}{\subsubsectionfmt}
+
+\titlespacing*{\section}{0pt}{3.5ex plus 1ex minus .2ex}{3ex plus .2ex}
+\titlespacing*{\subsection}{0pt}{2.8ex plus 1ex minus .2ex}{1.5ex plus .2ex}
+\titlespacing*{\subsubsection}{0pt}{2.2ex plus 1ex minus .2ex}{1ex plus .2ex}
+
+\begin{document}
+
+\section{Introduction}
+Your content for section 1 goes here. Lorem ipsum dolor sit amet, consectetur adipiscing elit.
+
+\subsection{Background}
+Your content for subsection goes here.
+
+\subsubsection{Details}
+Your content for subsubsection goes here.
+
+\subsection{Another Subsection}
+More content here.
+
+\section{Methodology}
+Your content for section 2 goes here.
+
+\end{document}

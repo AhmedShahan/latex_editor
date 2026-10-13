@@ -1,0 +1,57 @@
+\documentclass{article}
+\usepackage[margin=1in]{geometry}
+\usepackage{xcolor}
+\usepackage{tikz}
+\usepackage{titlesec}
+\usepackage{newpxtext,newpxmath} % serif font (বদলাতে পারেন)
+
+\definecolor{navy}{RGB}{25,55,110}
+\definecolor{bandcol}{RGB}{222,232,244}
+\definecolor{numtext}{RGB}{255,255,255}
+
+% ---------- Section ----------
+\newcommand{\sectionfmt}[1]{%
+  \noindent
+  \begin{tikzpicture}[baseline={(0,0.2cm)}]
+    % ফিকে নীল band (ডানে গোল কোণ)
+    \fill[bandcol, rounded corners=8pt]
+      (1.0cm,0) -- (\linewidth,0) -- (\linewidth,1.1cm) -- (1.45cm,1.1cm) -- cycle;
+    % গাঢ় নীল box (ডানে তির্যক কাটা, বামে গোল কোণ)
+    \fill[navy, rounded corners=5pt]
+      (0,0) -- (1.0cm,0) -- (1.45cm,1.1cm) -- (0,1.1cm) -- cycle;
+    \node[text=numtext, inner sep=0pt, font=\bfseries\huge] at (0.58cm,0.55cm) {\thesection};
+    \node[anchor=west, text=navy, inner sep=0pt, font=\bfseries\huge]
+      at (1.9cm,0.55cm) {#1};
+  \end{tikzpicture}\par}
+
+% ---------- Subsection ----------
+\newcommand{\subsectionfmt}[1]{%
+  \noindent{\color{navy}\bfseries\Large\thesubsection\hspace{0.8em}#1}\par}
+
+% ---------- Subsubsection ----------
+\newcommand{\subsubsectionfmt}[1]{%
+  \noindent{\color{navy}\bfseries\large\thesubsubsection\hspace{0.8em}#1}\par}
+
+\titleformat{\section}[block]{}{}{0pt}{\sectionfmt}
+\titleformat{\subsection}[block]{}{}{0pt}{\subsectionfmt}
+\titleformat{\subsubsection}[block]{}{}{0pt}{\subsubsectionfmt}
+
+\titlespacing*{\section}{0pt}{3ex plus 1ex minus .2ex}{2.5ex plus .2ex}
+\titlespacing*{\subsection}{0pt}{2.5ex plus 1ex minus .2ex}{1.2ex plus .2ex}
+\titlespacing*{\subsubsection}{0pt}{2ex plus 1ex minus .2ex}{1ex plus .2ex}
+
+\begin{document}
+
+\section{Theory}
+Ohm's law states that the current flowing through a conductor is directly proportional to the potential difference across it, provided the temperature remains constant.
+
+\subsection{Ohm's Law}
+Your content for subsection goes here.
+
+\subsubsection{Details}
+Your content for subsubsection goes here.
+
+\section{Experiment}
+Your content for section 2 goes here.
+
+\end{document}

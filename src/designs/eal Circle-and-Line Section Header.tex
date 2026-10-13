@@ -1,0 +1,61 @@
+\documentclass{article}
+\usepackage[margin=1in]{geometry}
+\usepackage{xcolor}
+\usepackage{tikz}
+\usepackage{titlesec}
+\usepackage{newpxtext,newpxmath}
+
+\definecolor{accent}{RGB}{0,128,128}   % teal (গোল, দাগ, নম্বর)
+\definecolor{ink}{RGB}{40,44,52}       % শিরোনামের color
+\definecolor{numtext}{RGB}{255,255,255}
+
+% ---------- Section ----------
+\newcommand{\sectionfmt}[1]{%
+  \noindent
+  \begin{tikzpicture}[baseline=(t.base)]
+    \node[circle, fill=accent, text=numtext, minimum size=1.1cm,
+          inner sep=0pt, font=\bfseries\Large] (c) {\thesection};
+    \node[anchor=west, text=ink, inner sep=0pt, font=\bfseries\huge] (t)
+      at ([xshift=0.4cm]c.east) {#1};
+    \draw[accent!35, line width=0.6pt]
+      ([yshift=-0.25cm]c.south west) -- ++(\linewidth,0);
+    \draw[accent, line width=2.2pt]
+      ([yshift=-0.25cm]c.south west) -- ++(2.2cm,0);
+  \end{tikzpicture}\par}
+
+\titleformat{\section}[block]{}{}{0pt}{\sectionfmt}
+
+% ---------- Subsection ----------
+\titleformat{\subsection}[block]
+  {\normalfont\Large\bfseries\color{ink}}
+  {\color{accent}\thesubsection}{0.8em}{}
+  [\vspace{-0.6ex}{\color{accent!35}\titlerule}]
+
+% ---------- Subsubsection ----------
+\titleformat{\subsubsection}[block]
+  {\normalfont\large\bfseries\color{ink}}
+  {\color{accent}\raisebox{0.05ex}{\rule{0.5em}{0.5em}}\hspace{0.4em}\thesubsubsection}
+  {0.7em}{}
+
+\titlespacing*{\section}{0pt}{3.5ex plus 1ex minus .2ex}{3ex plus .2ex}
+\titlespacing*{\subsection}{0pt}{2.8ex plus 1ex minus .2ex}{1.5ex plus .2ex}
+\titlespacing*{\subsubsection}{0pt}{2.2ex plus 1ex minus .2ex}{1ex plus .2ex}
+
+\begin{document}
+
+\section{Introduction}
+Your content for section 1 goes here. Lorem ipsum dolor sit amet, consectetur adipiscing elit.
+
+\subsection{Background}
+Your content for subsection goes here.
+
+\subsubsection{Details}
+Your content for subsubsection goes here.
+
+\subsection{Another Subsection}
+More content here.
+
+\section{Methodology}
+Your content for section 2 goes here.
+
+\end{document}

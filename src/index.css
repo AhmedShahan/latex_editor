@@ -404,31 +404,31 @@ code {
 
 .sectionkit-card-thumb {
   width: 100%;
-  aspect-ratio: 496 / 267;
   background: #fff;
   border: 1px solid var(--border);
   border-radius: 4px;
   overflow: hidden;
-  display: flex;
-  align-items: center;
-  justify-content: center;
   position: relative;
 }
 
 .sectionkit-thumb-img {
   display: block;
   width: 100%;
-  height: 100%;
-  object-fit: contain;
-  object-position: top center;
+  height: auto;
 }
 
 .sectionkit-thumb-missing {
+  width: 100%;
+  min-height: 160px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   color: var(--text);
   font-size: 12px;
 }
 
 .default-thumb {
+  aspect-ratio: 496 / 267;
   background: linear-gradient(135deg, #f0f0f0 0%, #e0e0e0 100%);
   background-image:
     repeating-linear-gradient(0deg, #ccc 0, #ccc 1px, transparent 1px, transparent 20px),
