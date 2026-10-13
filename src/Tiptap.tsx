@@ -4,9 +4,10 @@ import StarterKit from '@tiptap/starter-kit'
 import type { JSONContent, Range } from '@tiptap/core'
 import 'computer-modern/cmu-serif.css'
 import { SectionKitPicker } from './SectionKitPicker'
+import { SpacingPanel } from './SpacingPanel'
 import { useCompiledPreview } from './useCompiledPreview'
-import { getDesignById, extractPreamble, buildDocument } from './sectionkit'
-import type { DocType, PaperSize, FontSize, Geometry, MarginKey, Margins } from './types'
+import { getDesignById, extractPreamble, buildDocument, parseTitlespacing, hasTitlesec, buildSpacingLatex } from './sectionkit'
+import type { DocType, PaperSize, FontSize, Geometry, MarginKey, Margins, Spacing } from './types'
 import {
   HEADING_LABELS,
   PAPER_SIZES,
@@ -16,6 +17,7 @@ import {
   MARGIN_KEYS,
   MARGIN_LABELS,
   DEFAULT_MARGINS,
+  DEFAULT_SPACING,
 } from './types'
 
 type Mark = { type: string }
@@ -102,6 +104,8 @@ const toLatex = (
   fontSize: FontSize,
   geometry: Geometry,
   designPreamble = '',
+  spacing: Spacing = DEFAULT_SPACING,
+  headingSpacing = false,
 ): string => {
   const body = (doc.content ?? [])
     .map((n) => renderBlock(n, docType))
@@ -116,6 +120,7 @@ const toLatex = (
     geometryOptions: geoOpts,
     preamble: designPreamble,
     body,
+    spacingPreamble: buildSpacingLatex(spacing, headingSpacing),
   })
 }
 
@@ -178,7 +183,19 @@ const Tiptap = () => {
   const design = useMemo(() => (designId === DEFAULT_DESIGN_ID ? null : getDesignById(designId)), [designId])
   const designPreamble = useMemo(() => (design ? extractPreamble(design.raw) : ''), [design])
 
-  const code = json ? toLatex(json, docType, paperSize, fontSize, geometry, designPreamble) : ''
+  // Spacing: the design's own \titlespacing values, overridden by user edits
+  // for the design that is currently selected. Derived (not synced via effect),
+  // so switching designs automatically falls back to that design's values.
+  const [spacingEdits, setSpacingEdits] = useState<{ designId: string; value: Spacing } | null>(null)
+  const designSpacing = useMemo(() => parseTitlespacing(designPreamble), [designPreamble])
+  const spacingEnabled = useMemo(() => hasTitlesec(designPreamble), [designPreamble])
+  const spacing = spacingEdits?.designId === designId ? spacingEdits.value : designSpacing
+  const setSpacing = (value: Spacing) => setSpacingEdits({ designId, value })
+  const resetSpacing = () => setSpacingEdits(null)
+
+  const code = json
+    ? toLatex(json, docType, paperSize, fontSize, geometry, designPreamble, spacing, spacingEnabled)
+    : ''
 
   // Compilation is manual: Ctrl/Cmd+S only — typing never compiles.
   const { pages, loading, error, dirty, compile } = useCompiledPreview(code)
@@ -385,6 +402,13 @@ const Tiptap = () => {
         <SectionKitPicker
           selectedDesignId={designId}
           onSelectDesign={setDesignId}
+        />
+
+        <SpacingPanel
+          spacing={spacing}
+          onChange={setSpacing}
+          onReset={resetSpacing}
+          headingSpacingEnabled={spacingEnabled}
         />
 
         <div className="block-inserter" role="group" aria-label="Insert block">
