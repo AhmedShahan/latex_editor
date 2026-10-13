@@ -314,6 +314,17 @@ code {
   50% { opacity: 0.6; }
 }
 
+/* Unsaved-changes hint (manual compile) */
+.unsaved-indicator {
+  padding: 8px 16px;
+  background: var(--accent-bg);
+  color: var(--accent);
+  border-radius: 4px;
+  margin-bottom: 12px;
+  font-size: 13px;
+  text-align: center;
+}
+
 /* Compile error */
 .compile-error {
   padding: 12px 16px;

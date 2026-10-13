@@ -180,8 +180,20 @@ const Tiptap = () => {
 
   const code = json ? toLatex(json, docType, paperSize, fontSize, geometry, designPreamble) : ''
 
-  // Compile preview when code changes
-  const { pages, loading, error } = useCompiledPreview(code, activePaneTab === 'preview')
+  // Compilation is manual: Ctrl/Cmd+S only — typing never compiles.
+  const { pages, loading, error, dirty, compile } = useCompiledPreview(code)
+
+  // Ctrl+S / Cmd+S compiles the current LaTeX. Capture phase so it fires while
+  // focus is inside the Tiptap contenteditable; `compile` reads the latest code.
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (!(e.ctrlKey || e.metaKey) || e.key.toLowerCase() !== 's') return
+      e.preventDefault()
+      void compile()
+    }
+    window.addEventListener('keydown', onKeyDown, true)
+    return () => window.removeEventListener('keydown', onKeyDown, true)
+  }, [compile])
 
   // Manage SVG blob URLs for preview
   useEffect(() => {
@@ -465,6 +477,11 @@ const Tiptap = () => {
           {activePaneTab === 'preview' && (
             <div className="pane-content">
               {loading && <div className="compiling-indicator" aria-live="polite">Compiling…</div>}
+              {dirty && !loading && !error && (
+                <div className="unsaved-indicator" aria-live="polite">
+                  Unsaved changes — press Ctrl+S to compile
+                </div>
+              )}
               {error && <div className="compile-error" role="alert">{error}</div>}
               <div
                 style={{
@@ -503,7 +520,7 @@ const Tiptap = () => {
                   ))}
                   {svgBlobUrls.length === 0 && !loading && !error && (
                     <div style={{ padding: '2rem', textAlign: 'center', color: '#666' }}>
-                      No content to preview. Add sections and text in the editor.
+                      Press Ctrl+S to compile
                     </div>
                   )}
                 </div>

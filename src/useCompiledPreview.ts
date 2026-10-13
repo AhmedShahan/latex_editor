@@ -4,25 +4,38 @@ interface CompiledPreviewResult {
   pages: string[]
   loading: boolean
   error: string | null
+  /** True when the source has changed since the last successful compile. */
+  dirty: boolean
+  /** Compile the latest source. Stable identity; nothing compiles until called. */
+  compile: () => void
 }
 
 /**
  * Hook for compiling LaTeX to SVG via the SectionKit API.
- * - Debounces requests by 500ms
+ * - Never compiles on its own; the caller invokes `compile()` (e.g. Ctrl/Cmd+S)
+ * - Always compiles the latest source via a ref (never a stale value)
  * - Uses AbortController to cancel stale requests
- * - Keeps last good preview while compiling
+ * - Keeps the last good preview while compiling
  * - Caches by SHA1 on the server side
  */
-export function useCompiledPreview(latex: string, enabled = true): CompiledPreviewResult {
+export function useCompiledPreview(latex: string): CompiledPreviewResult {
   const [pages, setPages] = useState<string[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [compiledLatex, setCompiledLatex] = useState<string | null>(null)
 
   const abortRef = useRef<AbortController | null>(null)
-  const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const pendingLatexRef = useRef<string>('')
+  const latexRef = useRef(latex)
 
-  const compile = useCallback(async (latexToCompile: string) => {
+  // Latest-value mirror so `compile` stays stable and never compiles a stale
+  // value. This effect only writes a ref — it never fetches.
+  useEffect(() => {
+    latexRef.current = latex
+  }, [latex])
+
+  const compile = useCallback(async () => {
+    const latexToCompile = latexRef.current
+
     // Abort any in-flight request
     if (abortRef.current) {
       abortRef.current.abort()
@@ -56,6 +69,7 @@ export function useCompiledPreview(latex: string, enabled = true): CompiledPrevi
 
       if (data.pages && Array.isArray(data.pages)) {
         setPages(data.pages)
+        setCompiledLatex(latexToCompile)
       }
     } catch (e) {
       if (controller.signal.aborted) return
@@ -67,28 +81,20 @@ export function useCompiledPreview(latex: string, enabled = true): CompiledPrevi
     }
   }, [])
 
+  // Abort any in-flight compile on unmount (replaces the old debounce cleanup).
   useEffect(() => {
-    if (!enabled) return
-
-    pendingLatexRef.current = latex
-
-    if (timeoutRef.current) {
-      clearTimeout(timeoutRef.current)
-    }
-
-    timeoutRef.current = setTimeout(() => {
-      compile(pendingLatexRef.current)
-    }, 500)
-
     return () => {
-      if (timeoutRef.current) {
-        clearTimeout(timeoutRef.current)
-      }
       if (abortRef.current) {
         abortRef.current.abort()
       }
     }
-  }, [latex, enabled, compile])
+  }, [])
 
-  return { pages, loading, error }
+  return {
+    pages,
+    loading,
+    error,
+    dirty: compiledLatex !== null && compiledLatex !== latex,
+    compile,
+  }
 }
